@@ -1,0 +1,8 @@
+apiVersion: metallb.io/v1beta1
+kind: IPAddressPool
+metadata:
+  name: vlan103-k3s-pool
+  namespace: metallb-system
+spec:
+  addresses:
+  - $lbrange

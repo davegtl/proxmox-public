@@ -1,0 +1,10 @@
+apiVersion: metallb.io/v1beta1
+kind: L2Advertisement
+metadata:
+  name: vlan103-k3s-l2
+  namespace: metallb-system
+spec:
+  ipAddressPools:
+  - vlan103-k3s-pool
+
+
