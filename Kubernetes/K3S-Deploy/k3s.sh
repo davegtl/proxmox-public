@@ -50,6 +50,12 @@ config_file=~/.ssh/config
 #############################################
 #            DO NOT EDIT BELOW              #
 #############################################
+
+# Start SSH agent and add key
+eval "$(ssh-agent -s)"
+ssh-add ~/.ssh/$certName
+
+
 # For testing purposes - in case time is wrong due to VM snapshots
 sudo timedatectl set-ntp off
 sudo timedatectl set-ntp on
@@ -212,3 +218,6 @@ kubectl apply -f https://raw.githubusercontent.com/davegtl/proxmox-public/main/K
 kubectl get nodes
 kubectl get svc
 kubectl get pods --all-namespaces -o wide
+
+# Kill SSH agent to clean up
+ssh-agent -k
