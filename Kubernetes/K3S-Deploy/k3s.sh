@@ -219,5 +219,25 @@ kubectl get nodes
 kubectl get svc
 kubectl get pods --all-namespaces -o wide
 
+echo -e " \033[32;5mK3S HA Cluster with Kube-VIP and Metallb deployed successfully!\033[0m"
+
+#############################################
+#  Prompt to install Rancher
+#############################################
+read -p "Do you wish to install Rancher now? [y/N]: " install_rancher
+if [[ "${install_rancher,,}" == "y" ]]; then
+  echo "→ Downloading Rancher installer…"
+  curl -sO https://raw.githubusercontent.com/davegtl/proxmox-public/main/Kubernetes/Rancher-Deploy/rancher-deploy.sh
+  chmod +x rancher-deploy.sh
+  echo "→ Running Rancher installer…"
+  ./rancher-deploy.sh
+else
+  echo "→ Skipping Rancher installation."
+fi
+
+
+
+
+
 # Kill SSH agent to clean up
 ssh-agent -k
