@@ -1,5 +1,10 @@
 #!/bin/bash
 
+
+# Start SSH agent and add key
+eval "$(ssh-agent -s)"
+ssh-add ~/.ssh/$certName
+
 # Check if all nodes are reachable before continuing
 echo -e "\033[34;5mChecking node availability...\033[0m"
 
@@ -70,6 +75,8 @@ certName=id_rsa
 # Start SSH agent and add key
 eval "$(ssh-agent -s)"
 ssh-add ~/.ssh/$certName
+
+
 # For testing purposes - in case time is wrong due to VM snapshots
 sudo timedatectl set-ntp off
 sudo timedatectl set-ntp on
