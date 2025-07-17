@@ -1,3 +1,6 @@
+#multus-deploy.sh
+#!/bin/bash
+set -euo pipefail
 # 1. Add the RKE2 charts repo
 helm repo add rke2-charts https://rke2-charts.rancher.io
 helm repo update
