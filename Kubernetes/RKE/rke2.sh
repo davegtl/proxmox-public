@@ -1,28 +1,5 @@
 #!/bin/bash
 
-
-# Start SSH agent and add key
-eval "$(ssh-agent -s)"
-ssh-add ~/.ssh/$certName
-
-# Check if all nodes are reachable before continuing
-echo -e "\033[34;5mChecking node availability...\033[0m"
-
-# List of all nodes to check (admin + all install targets)
-check_nodes=($admin $master1 $master2 $master3 $worker1 $worker2)
-
-for node in "${check_nodes[@]}"; do
-  if ! ping -c 2 -W 1 $node &> /dev/null; then
-    echo -e "\033[31;5mERROR: Node $node is not reachable. Exiting...\033[0m"
-    exit 1
-  else
-    echo -e "\033[32;5mSUCCESS: Node $node is reachable.\033[0m"
-  fi
-done
-
-echo -e "\033[34;5mAll nodes reachable. Continuing with installation...\033[0m"
-
-
 #############################################
 # YOU SHOULD ONLY NEED TO EDIT THIS SECTION #
 #############################################
@@ -50,32 +27,42 @@ vip=10.0.103.10
 # Array of all master nodes
 allmasters=($master1 $master2 $master3)
 
-# Array of master nodes
+# Array of master nodes excluding master1 (for joining later)
 masters=($master2 $master3)
 
 # Array of worker nodes
 workers=($worker1 $worker2)
 
-# Array of all
+# Array of all nodes
 all=($master1 $master2 $master3 $worker1 $worker2)
 
-# Array of all minus master1
-allnomaster1=($master2 $master3 $worker1 $worker2)
-
-#Loadbalancer IP range
+# Loadbalancer IP range
 lbrange=10.0.103.101-10.0.103.200
 
-#ssh certificate name variable
+# SSH certificate name
 certName=id_rsa
 
 #############################################
 #            DO NOT EDIT BELOW              #
 #############################################
 
+# Check if all nodes are reachable before continuing
+echo -e "\033[34;5mChecking node availability...\033[0m"
+check_nodes=($admin $master1 $master2 $master3 $worker1 $worker2)
+for node in "${check_nodes[@]}"; do
+  if ! ping -c 2 -W 1 $node &> /dev/null; then
+    echo -e "\033[31;5mERROR: Node $node is not reachable. Exiting...\033[0m"
+    exit 1
+  else
+    echo -e "\033[32;5mSUCCESS: Node $node is reachable.\033[0m"
+  fi
+done
+
+echo -e "\033[34;5mAll nodes reachable. Continuing with installation...\033[0m"
+
 # Start SSH agent and add key
 eval "$(ssh-agent -s)"
 ssh-add ~/.ssh/$certName
-
 
 # For testing purposes - in case time is wrong due to VM snapshots
 sudo timedatectl set-ntp off
@@ -87,157 +74,128 @@ chmod 600 /home/$user/.ssh/$certName
 chmod 644 /home/$user/.ssh/$certName.pub
 
 # Install Kubectl if not already present
-if ! command -v kubectl version &> /dev/null
-then
-    echo -e " \033[31;5mKubectl not found, installing\033[0m"
-    curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
-    sudo install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
+if ! command -v kubectl version &> /dev/null; then
+  echo -e " \033[31;5mKubectl not found, installing\033[0m"
+  curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+  sudo install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
 else
-    echo -e " \033[32;5mKubectl already installed\033[0m"
+  echo -e " \033[32;5mKubectl already installed\033[0m"
 fi
 
-# Create SSH Config file to ignore checking (don't use in production!)
+# Create SSH config file to ignore host key checking (not recommended for production)
 sed -i '1s/^/StrictHostKeyChecking no\n/' ~/.ssh/config
 
-#add ssh keys for all nodes
+# Add SSH keys to all nodes
 for node in "${all[@]}"; do
   ssh-copy-id $user@$node
 done
 
-# Step 1: Create Kube VIP
-# create RKE2's self-installing manifest dir
+# Step 1: Create Kube-VIP manifest
 sudo mkdir -p /var/lib/rancher/rke2/server/manifests
-# Install the kube-vip deployment into rke2's self-installing manifest folder
 curl -sO https://raw.githubusercontent.com/davegtl/proxmox-public/main/Kubernetes/RKE2/kube-vip
-cat kube-vip | sed 's/$interface/'$interface'/g; s/$vip/'$vip'/g' > $HOME/kube-vip.yaml
+cat kube-vip | sed "s/\$interface/$interface/g; s/\$vip/$vip/g" > $HOME/kube-vip.yaml
 sudo mv kube-vip.yaml /var/lib/rancher/rke2/server/manifests/kube-vip.yaml
-
-# Find/Replace all k3s entries to represent rke2
 sudo sed -i 's/k3s/rke2/g' /var/lib/rancher/rke2/server/manifests/kube-vip.yaml
-# copy kube-vip.yaml to home directory
 sudo cp /var/lib/rancher/rke2/server/manifests/kube-vip.yaml ~/kube-vip.yaml
-# change owner
-sudo chown $user:$user kube-vip.yaml
-# make kube folder to run kubectl later
-mkdir ~/.kube
+sudo chown $user:$user ~/kube-vip.yaml
+mkdir -p ~/.kube
 
-# create the rke2 config file
+# Step 2: Create RKE2 config.yaml
+mkdir -p ~/rke2tmp
+cat <<EOF > ~/rke2tmp/config.yaml
+tls-san:
+  - $vip
+  - $master1
+  - $master2
+  - $master3
+write-kubeconfig-mode: 0644
+disable:
+  - rke2-ingress-nginx
+EOF
 sudo mkdir -p /etc/rancher/rke2
-touch config.yaml
-echo "tls-san:" >> config.yaml 
-echo "  - $vip" >> config.yaml
-echo "  - $master1" >> config.yaml
-echo "  - $master2" >> config.yaml
-echo "  - $master3" >> config.yaml
-echo "write-kubeconfig-mode: 0644" >> config.yaml
-echo "disable:" >> config.yaml
-echo "  - rke2-ingress-nginx" >> config.yaml
-# copy config.yaml to rancher directory
-sudo cp ~/config.yaml /etc/rancher/rke2/config.yaml
+sudo cp ~/rke2tmp/config.yaml /etc/rancher/rke2/config.yaml
 
-# update path with rke2-binaries
-echo 'export KUBECONFIG=/etc/rancher/rke2/rke2.yaml' >> ~/.bashrc ; echo 'export PATH=${PATH}:/var/lib/rancher/rke2/bin' >> ~/.bashrc ; echo 'alias k=kubectl' >> ~/.bashrc ; source ~/.bashrc ;
+# Set up environment
+echo 'export KUBECONFIG=/etc/rancher/rke2/rke2.yaml' >> ~/.bashrc
+echo 'export PATH=${PATH}:/var/lib/rancher/rke2/bin' >> ~/.bashrc
+echo 'alias k=kubectl' >> ~/.bashrc
+source ~/.bashrc
 
-# Step 2: Copy kube-vip.yaml and certs to all masters
+# Step 3: Copy kube-vip and config to all masters
 for newnode in "${allmasters[@]}"; do
-  scp -i ~/.ssh/$certName $HOME/kube-vip.yaml $user@$newnode:~/kube-vip.yaml
-  scp -i ~/.ssh/$certName $HOME/config.yaml $user@$newnode:~/config.yaml
-  scp -i ~/.ssh/$certName ~/.ssh/{$certName,$certName.pub} $user@$newnode:~/.ssh
-  echo -e " \033[32;5mCopied successfully!\033[0m"
+  scp -i ~/.ssh/$certName ~/kube-vip.yaml $user@$newnode:~/kube-vip.yaml
+  scp -i ~/.ssh/$certName ~/rke2tmp/config.yaml $user@$newnode:~/config.yaml
+  echo -e " \033[32;5mCopied config and kube-vip to $newnode\033[0m"
 done
 
-# Step 3: Connect to Master1 and move kube-vip.yaml and config.yaml. Then install RKE2, copy token back to admin machine. We then use the token to bootstrap additional masternodes
-ssh -tt $user@$master1 -i ~/.ssh/$certName sudo su <<EOF
-mkdir -p /var/lib/rancher/rke2/server/manifests
-mv kube-vip.yaml /var/lib/rancher/rke2/server/manifests/kube-vip.yaml
-mkdir -p /etc/rancher/rke2
-mv config.yaml /etc/rancher/rke2/config.yaml
-echo 'export KUBECONFIG=/etc/rancher/rke2/rke2.yaml' >> ~/.bashrc ; echo 'export PATH=${PATH}:/var/lib/rancher/rke2/bin' >> ~/.bashrc ; echo 'alias k=kubectl' >> ~/.bashrc ; source ~/.bashrc ;
-curl -sfL https://get.rke2.io | sh -
-systemctl enable rke2-server.service
-systemctl start rke2-server.service
-echo "StrictHostKeyChecking no" > ~/.ssh/config
-ssh-copy-id -i /home/$user/.ssh/$certName $user@$admin
-scp -i /home/$user/.ssh/$certName /var/lib/rancher/rke2/server/token $user@$admin:~/token
-scp -i /home/$user/.ssh/$certName /etc/rancher/rke2/rke2.yaml $user@$admin:~/.kube/rke2.yaml
-exit
+# Step 4: Install RKE2 on master1
+ssh -i ~/.ssh/$certName $user@$master1 <<EOF
+sudo mkdir -p /var/lib/rancher/rke2/server/manifests
+sudo mv ~/kube-vip.yaml /var/lib/rancher/rke2/server/manifests/kube-vip.yaml
+sudo mkdir -p /etc/rancher/rke2
+sudo mv ~/config.yaml /etc/rancher/rke2/config.yaml
+curl -sfL https://get.rke2.io | sudo sh -
+sudo systemctl enable rke2-server.service
+sudo systemctl start rke2-server.service
 EOF
-echo -e " \033[32;5mMaster1 Completed\033[0m"
 
-# Step 4: Set variable to the token we just extracted, set kube config location
-token=`cat token`
-sudo cat ~/.kube/rke2.yaml | sed 's/127.0.0.1/'$master1'/g' > $HOME/.kube/config
-sudo chown $(id -u):$(id -g) $HOME/.kube/config
-export KUBECONFIG=${HOME}/.kube/config
-sudo cp ~/.kube/config /etc/rancher/rke2/rke2.yaml
-kubectl get nodes
+# Step 5: Fetch token and kubeconfig
+ssh -i ~/.ssh/$certName $user@$master1 "sudo cat /var/lib/rancher/rke2/server/token" > ~/token
+ssh -i ~/.ssh/$certName $user@$master1 "sudo cat /etc/rancher/rke2/rke2.yaml" > ~/.kube/rke2.yaml
 
-# Step 5: Install kube-vip as network LoadBalancer - Install the kube-vip Cloud Provider
-kubectl apply -f https://kube-vip.io/manifests/rbac.yaml
-kubectl apply -f https://raw.githubusercontent.com/kube-vip/kube-vip-cloud-provider/main/manifest/kube-vip-cloud-controller.yaml
+# Step 6: Set up kubeconfig locally
+export token=$(cat ~/token)
+sed "s/127.0.0.1/$master1/g" ~/.kube/rke2.yaml > ~/.kube/config
+chmod 600 ~/.kube/config
+export KUBECONFIG=~/.kube/config
 
-# Step 6: Add other Masternodes, note we import the token we extracted from step 3
+# Step 7: Join other master nodes
 for newnode in "${masters[@]}"; do
-  ssh -tt $user@$newnode -i ~/.ssh/$certName sudo su <<EOF
-  mkdir -p /etc/rancher/rke2
-  touch /etc/rancher/rke2/config.yaml
-  echo "token: $token" >> /etc/rancher/rke2/config.yaml
-  echo "server: https://$master1:9345" >> /etc/rancher/rke2/config.yaml
-  echo "tls-san:" >> /etc/rancher/rke2/config.yaml
-  echo "  - $vip" >> /etc/rancher/rke2/config.yaml
-  echo "  - $master1" >> /etc/rancher/rke2/config.yaml
-  echo "  - $master2" >> /etc/rancher/rke2/config.yaml
-  echo "  - $master3" >> /etc/rancher/rke2/config.yaml
-  curl -sfL https://get.rke2.io | sh -
-  systemctl enable rke2-server.service
-  systemctl start rke2-server.service
-  exit
+  ssh -i ~/.ssh/$certName $user@$newnode <<EOF
+sudo mkdir -p /etc/rancher/rke2
+cat <<EOL | sudo tee /etc/rancher/rke2/config.yaml
+token: $token
+server: https://$master1:9345
+tls-san:
+  - $vip
+  - $master1
+  - $master2
+  - $master3
+EOL
+curl -sfL https://get.rke2.io | sudo sh -
+sudo systemctl enable rke2-server.service
+sudo systemctl start rke2-server.service
 EOF
-  echo -e " \033[32;5mMaster node joined successfully!\033[0m"
+  echo -e " \033[32;5mMaster $newnode joined successfully!\033[0m"
 done
 
 kubectl get nodes
 
-# Step 7: Add Workers
+# Step 8: Join worker nodes
 for newnode in "${workers[@]}"; do
-  ssh -tt $user@$newnode -i ~/.ssh/$certName sudo su <<EOF
-  mkdir -p /etc/rancher/rke2
-  touch /etc/rancher/rke2/config.yaml
-  echo "token: $token" >> /etc/rancher/rke2/config.yaml
-  echo "server: https://$vip:9345" >> /etc/rancher/rke2/config.yaml
-  echo "node-label:" >> /etc/rancher/rke2/config.yaml
-  echo "  - worker=true" >> /etc/rancher/rke2/config.yaml
-  echo "  - longhorn=true" >> /etc/rancher/rke2/config.yaml
-  curl -sfL https://get.rke2.io | INSTALL_RKE2_TYPE="agent" sh -
-  systemctl enable rke2-agent.service
-  systemctl start rke2-agent.service
-  exit
+ssh -i ~/.ssh/$certName $user@$newnode <<EOF
+sudo mkdir -p /etc/rancher/rke2
+cat <<EOL | sudo tee /etc/rancher/rke2/config.yaml
+token: $token
+server: https://$vip:9345
+node-label:
+  - worker=true
+  - longhorn=true
+EOL
+curl -sfL https://get.rke2.io | sudo INSTALL_RKE2_TYPE="agent" sh -
+sudo systemctl enable rke2-agent.service
+sudo systemctl start rke2-agent.service
 EOF
-  echo -e " \033[32;5mWorker node joined successfully!\033[0m"
+  echo -e " \033[32;5mWorker $newnode joined successfully!\033[0m"
+  echo -e " \033[34;5mWaiting for node $newnode to appear in the cluster...\033[0m"
+  while ! kubectl get nodes | grep -q "$newnode"; do sleep 2; done
+  echo -e " \033[32;5mNode $newnode successfully registered!\033[0m"
 done
 
 kubectl get nodes
 
-# Step 8: Install Metallb
-echo -e " \033[32;5mDeploying Metallb\033[0m"
-kubectl apply -f https://raw.githubusercontent.com/metallb/metallb/v0.12.1/manifests/namespace.yaml
-kubectl apply -f https://raw.githubusercontent.com/metallb/metallb/v0.13.12/config/manifests/metallb-native.yaml
-# Download ipAddressPool and configure using lbrange above
-curl -sO https://raw.githubusercontent.com/davegtl/proxmox-public/main/Kubernetes/RKE2/ipAddressPool
-cat ipAddressPool | sed 's/$lbrange/'$lbrange'/g' > $HOME/ipAddressPool.yaml
-
-# Step 9: Deploy IP Pools and l2Advertisement
-echo -e " \033[32;5mAdding IP Pools, waiting for Metallb to be available first. This can take a long time as we're likely being rate limited for container pulls...\033[0m"
-kubectl wait --namespace metallb-system \
-                --for=condition=ready pod \
-                --selector=component=controller \
-                --timeout=1800s
-kubectl apply -f ipAddressPool.yaml
-kubectl apply -f https://raw.githubusercontent.com/davegtl/proxmox-public/main/Kubernetes/RKE2/l2Advertisement.yaml
-
-# Step 10: Install Rancher (Optional - Delete if not required)
+# Step 8: Install Rancher (Optional - Delete if not required)
 #Install Helm
-echo -e " \033[32;5mInstalling Helm\033[0m"
 curl -fsSL -o get_helm.sh https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3
 chmod 700 get_helm.sh
 ./get_helm.sh
@@ -247,21 +205,19 @@ helm repo add rancher-latest https://releases.rancher.com/server-charts/latest
 kubectl create namespace cattle-system
 
 # Install Cert-Manager
-echo -e " \033[32;5mDeploying Cert-Manager\033[0m"
 kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.13.2/cert-manager.crds.yaml
 helm repo add jetstack https://charts.jetstack.io
 helm repo update
 helm install cert-manager jetstack/cert-manager \
 --namespace cert-manager \
 --create-namespace \
---version v1.18.2
+--version v1.14.4
 kubectl get pods --namespace cert-manager
 
 # Install Rancher
-echo -e " \033[32;5mDeploying Rancher\033[0m"
 helm install rancher rancher-latest/rancher \
  --namespace cattle-system \
- --set hostname=rancher.lan \
+ --set hostname=rancher.my.org \
  --set bootstrapPassword=admin
 kubectl -n cattle-system rollout status deploy/rancher
 kubectl -n cattle-system get deploy rancher
@@ -276,3 +232,6 @@ done
 kubectl get svc -n cattle-system
 
 echo -e " \033[32;5mAccess Rancher from the IP above - Password is admin!\033[0m"
+
+# Update Kube Config with VIP IP
+sudo cat /etc/rancher/rke2/rke2.yaml | sed 's/'$master1'/'$vip'/g' > /etc/rancher/rke2/rke2.yaml
