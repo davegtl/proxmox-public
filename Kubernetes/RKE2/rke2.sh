@@ -171,9 +171,19 @@ done
 
 kubectl get nodes
 
-# Step 8: Join worker nodes
+echo -e " \033[34;5mWaiting for kube-vip VIP at $vip to respond to Kubernetes API...\033[0m"
+
+until curl -sk https://$vip:9345/version > /dev/null; do
+  echo -e " \033[33;5mWaiting for VIP $vip to respond to /version...\033[0m"
+  sleep 3
+done
+
+echo -e " \033[32;5mVIP is responding! Kubernetes API is ready at https://$vip:9345\033[0m"
+
+
+
 for newnode in "${workers[@]}"; do
-ssh -i ~/.ssh/$certName $user@$newnode <<EOF
+  ssh -i ~/.ssh/$certName $user@$newnode <<EOF
 sudo mkdir -p /etc/rancher/rke2
 cat <<EOL | sudo tee /etc/rancher/rke2/config.yaml
 token: $token
@@ -186,10 +196,13 @@ curl -sfL https://get.rke2.io | sudo INSTALL_RKE2_TYPE="agent" sh -
 sudo systemctl enable rke2-agent.service
 sudo systemctl start rke2-agent.service
 EOF
+
   echo -e " \033[32;5mWorker $newnode joined successfully!\033[0m"
-  echo -e " \033[34;5mWaiting for node $newnode to appear in the cluster...\033[0m"
-  while ! kubectl get nodes | grep -q "$newnode"; do sleep 2; done
-  echo -e " \033[32;5mNode $newnode successfully registered!\033[0m"
+
+  host=$(ssh -i ~/.ssh/$certName $user@$newnode "hostname")
+  echo -e " \033[34;5mWaiting for node $host to appear in the cluster...\033[0m"
+  while ! kubectl get nodes | grep -q "$host"; do sleep 2; done
+  echo -e " \033[32;5mNode $host successfully registered!\033[0m"
 done
 
 kubectl get nodes
