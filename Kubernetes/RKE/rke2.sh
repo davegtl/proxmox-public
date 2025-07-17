@@ -1,5 +1,22 @@
 #!/bin/bash
 
+# Check if all nodes are reachable before continuing
+echo -e "\033[34;5mChecking node availability...\033[0m"
+
+# List of all nodes to check (admin + all install targets)
+check_nodes=($admin $master1 $master2 $master3 $worker1 $worker2)
+
+for node in "${check_nodes[@]}"; do
+  if ! ping -c 2 -W 1 $node &> /dev/null; then
+    echo -e "\033[31;5mERROR: Node $node is not reachable. Exiting...\033[0m"
+    exit 1
+  else
+    echo -e "\033[32;5mSUCCESS: Node $node is reachable.\033[0m"
+  fi
+done
+
+echo -e "\033[34;5mAll nodes reachable. Continuing with installation...\033[0m"
+
 
 #############################################
 # YOU SHOULD ONLY NEED TO EDIT THIS SECTION #
