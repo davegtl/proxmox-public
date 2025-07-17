@@ -190,7 +190,6 @@ token: $token
 server: https://$vip:9345
 node-label:
   - worker=true
-  - longhorn=true
 EOL
 curl -sfL https://get.rke2.io | sudo INSTALL_RKE2_TYPE="agent" sh -
 sudo systemctl enable rke2-agent.service
@@ -207,44 +206,75 @@ done
 
 kubectl get nodes
 
-# Step 8: Install Rancher (Optional - Delete if not required)
-#Install Helm
-curl -fsSL -o get_helm.sh https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3
-chmod 700 get_helm.sh
-./get_helm.sh
+#PACKAGE MANAGER INSTALLATION
+read -p "Do you want to install Rancher, MetalLB, and Cert-Manager? [y/N]: " install_rancher
 
-# Add Rancher Helm Repo & create namespace
-helm repo add rancher-latest https://releases.rancher.com/server-charts/latest
-kubectl create namespace cattle-system
+if [[ "$install_rancher" =~ ^[Yy]$ ]]; then
+  # Install Helm
+  curl -fsSL -o get_helm.sh https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3
+  chmod 700 get_helm.sh
+  ./get_helm.sh
 
-# Install Cert-Manager
-kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.13.2/cert-manager.crds.yaml
-helm repo add jetstack https://charts.jetstack.io
-helm repo update
-helm install cert-manager jetstack/cert-manager \
---namespace cert-manager \
---create-namespace \
---version v1.14.4
-kubectl get pods --namespace cert-manager
+  # Add Rancher Helm Repo & create namespace
+  helm repo add rancher-latest https://releases.rancher.com/server-charts/latest
+  kubectl create namespace cattle-system
 
-# Install Rancher
-helm install rancher rancher-latest/rancher \
- --namespace cattle-system \
- --set hostname=rancher.my.org \
- --set bootstrapPassword=admin
-kubectl -n cattle-system rollout status deploy/rancher
-kubectl -n cattle-system get deploy rancher
+  # Install MetalLB
+    kubectl apply -f https://raw.githubusercontent.com/metallb/metallb/v0.14.5/config/manifests/metallb-native.yaml
 
-# Add Rancher LoadBalancer
-kubectl get svc -n cattle-system
-kubectl expose deployment rancher --name=rancher-lb --port=443 --type=LoadBalancer -n cattle-system
-while [[ $(kubectl get svc -n cattle-system 'jsonpath={..status.conditions[?(@.type=="Pending")].status}') = "True" ]]; do
-   sleep 5
-   echo -e " \033[32;5mWaiting for LoadBalancer to come online\033[0m" 
-done
-kubectl get svc -n cattle-system
+  # Download ipAddressPool and configure using lbrange above
+  curl -sO https://raw.githubusercontent.com/davegtl/proxmox-public/main/Kubernetes/RKE2/ipAddressPool
+  cat ipAddressPool | sed 's/$lbrange/'$lbrange'/g' > $HOME/ipAddressPool.yaml
 
-echo -e " \033[32;5mAccess Rancher from the IP above - Password is admin!\033[0m"
+  # ✅ Wait for MetalLB controller to be ready
+  kubectl wait --namespace metallb-system \
+    --for=condition=ready pod \
+    --selector=component=controller \
+    --timeout=120s
 
-# Update Kube Config with VIP IP
-sudo cat /etc/rancher/rke2/rke2.yaml | sed 's/'$master1'/'$vip'/g' > /etc/rancher/rke2/rke2.yaml
+  # ✅ Now apply the pool and l2Advertisement
+  kubectl apply -f $HOME/ipAddressPool.yaml
+  kubectl apply -f https://raw.githubusercontent.com/davegtl/proxmox-public/main/Kubernetes/RKE2/l2Advertisement.yaml
+
+  kubectl get nodes
+  kubectl get svc
+  kubectl get pods --all-namespaces -o wide
+
+  # Install Cert-Manager
+  kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.13.2/cert-manager.crds.yaml
+  helm repo add jetstack https://charts.jetstack.io
+  helm repo update
+  helm install cert-manager jetstack/cert-manager \
+    --namespace cert-manager \
+    --create-namespace \
+    --version v1.14.4
+  kubectl get pods --namespace cert-manager
+
+  # Install Rancher
+  helm install rancher rancher-latest/rancher \
+    --namespace cattle-system \
+    --set hostname=rancher.my.org \
+    --set bootstrapPassword=admin \
+    --set service.type=LoadBalancer \
+    --set service.loadBalancerIP=10.0.103.101
+  kubectl -n cattle-system rollout status deploy/rancher
+  kubectl -n cattle-system get deploy rancher
+
+  # Wait for Rancher LoadBalancer to get an external IP
+  echo -e " \033[32;5mWaiting for Rancher LoadBalancer to get an external IP...\033[0m"
+  while [[ $(kubectl get svc rancher -n cattle-system -o jsonpath='{.status.loadBalancer.ingress[0].ip}') == "" ]]; do
+      sleep 5
+      echo -e " \033[33mStill waiting...\033[0m"
+  done
+  echo -e " \033[32;5mRancher LoadBalancer is now available at IP: $(kubectl get svc rancher -n cattle-system -o jsonpath='{.status.loadBalancer.ingress[0].ip}')\033[0m"
+
+  kubectl get svc -n cattle-system
+
+  echo -e " \033[32;5mAccess Rancher from the IP above - Password is admin!\033[0m"
+
+  # Update Kube Config with VIP IP
+  sudo sed "s/$master1/$vip/g" /etc/rancher/rke2/rke2.yaml | sudo tee /etc/rancher/rke2/rke2.yaml > /dev/null
+
+else
+  echo -e " \033[33mSkipping Rancher, MetalLB, and Cert-Manager installation.\033[0m"
+fi

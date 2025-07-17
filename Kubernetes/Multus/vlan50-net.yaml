@@ -1,5 +1,5 @@
 # vlan50-net.yaml
-# This file defines a NetworkAttachmentDefinition for a VLAN network using Multus CNI.
+# This file defines a NetworkAttachmentDefinition for a VLAN50 network using Multus CNI with DHCP IPAM.
 apiVersion: k8s.cni.cncf.io/v1
 kind: NetworkAttachmentDefinition
 metadata:
@@ -13,15 +13,11 @@ spec:
       "plugins": [
         {
           "type": "macvlan",
-          "master": "eth1",
+          "master": "ens19",
           "mode": "bridge",
           "vlan": 50,
           "ipam": {
-            "type": "host-local",
-            "subnet": "10.0.50.0/24",
-            "gateway": "10.0.50.1",
-            "rangeStart": "10.0.50.100",
-            "rangeEnd": "10.0.50.149"
+            "type": "dhcp"
           }
         }
       ]
