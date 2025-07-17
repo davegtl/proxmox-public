@@ -1,5 +1,7 @@
-#vlan50-test.yaml
+# vlan50-test.yaml
 # This file defines a Pod that uses the vlan50-net NetworkAttachmentDefinition created by Multus
+# kubectl apply -f vlan50-test.yaml
+
 apiVersion: v1
 kind: Pod
 metadata:
