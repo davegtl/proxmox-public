@@ -1,15 +1,11 @@
-# test-vlan50.yaml
-# This file defines a Pod that uses the vlan50-net NetworkAttachmentDefinition created by Multus
-# kubectl apply -f test-vlan50.yaml
-
 apiVersion: v1
 kind: Pod
 metadata:
   name: test-vlan50
   namespace: webservices
   annotations:
-    k8s.v1.cni.cncf.io/networks: '[{ "name": "vlan50-net", "ips": ["10.0.50.123"] }]'
+    k8s.v1.cni.cncf.io/networks: '[{ "name": "vlan50-net", "ips": ["10.0.50.123/24"] }]'
 spec:
   containers:
   - name: pause
-    image: k8s.gcr.io/pause:3.2
+    image: registry.k8s.io/pause:3.9
