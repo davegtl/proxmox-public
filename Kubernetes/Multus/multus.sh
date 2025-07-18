@@ -8,7 +8,7 @@ kubectl get ns webservices >/dev/null 2>&1 || kubectl create ns webservices
 
 # 1) Download VLAN50 network attachment definition
 curl -sO https://raw.githubusercontent.com/davegtl/proxmox-public/main/Kubernetes/Multus/vlan50-net.yaml
-curl -sO https://raw.githubusercontent.com/davegtl/proxmox-public/main/Kubernetes/Multus/vlan50-test.yaml
+curl -sO https://raw.githubusercontent.com/davegtl/proxmox-public/main/Kubernetes/Multus/test-vlan50.yaml
 
 # 2) Apply Multus (thin plugin)
 kubectl apply -f https://raw.githubusercontent.com/k8snetworkplumbingwg/multus-cni/master/deployments/multus-daemonset.yml
