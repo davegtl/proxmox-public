@@ -7,12 +7,12 @@ sudo apt-get install -y dnsmasq
 
 
 
-kubectl delete pod vlan50-test -n webservices
-kubectl apply -f vlan50-test.yaml
+kubectl delete pod test-vlan50 -n webservices
+kubectl apply -f test-vlan50.yaml
 
 kubectl exec -n webservices vlan50-test -- ip a
 
-kubectl describe pod vlan50-test -n webservices
+kubectl describe pod test-vlan50 -n webservices
 
 sudo nano /etc/systemd/system/cni-dhcp.service
 [Unit]
