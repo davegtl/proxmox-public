@@ -204,7 +204,18 @@ EOF
   echo -e " \033[32;5mNode $host successfully registered!\033[0m"
 done
 
-kubectl get nodes
+# Wait for all nodes to be Ready
+echo -e " \033[34;5mWaiting for all nodes to be Ready...\033[0m"
+until kubectl get nodes | grep -v "NotReady" | grep -q "Ready"; do
+  kubectl get nodes
+  sleep 3
+done
+
+# Wait for all pods in kube-system to be ready
+echo -e " \033[34;5mWaiting for all kube-system pods to be ready...\033[0m"
+kubectl wait --for=condition=Ready pods --all -n kube-system --timeout=300s
+
+echo -e " \033[32;5mAll nodes are Ready and all kube-system pods are running!\033[0m"
 
 #PACKAGE MANAGER INSTALLATION
 read -p "Do you want to install Rancher, MetalLB, and Cert-Manager? [y/N]: " install_rancher
