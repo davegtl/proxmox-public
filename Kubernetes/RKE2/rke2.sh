@@ -253,7 +253,7 @@ if [[ "$install_rancher" =~ ^[Yy]$ ]]; then
   # Install Rancher
   helm install rancher rancher-latest/rancher \
     --namespace cattle-system \
-    --set hostname=rancher.my.org \
+    --set hostname=rancher.lan \
     --set bootstrapPassword=admin \
     --set service.type=LoadBalancer \
     --set service.loadBalancerIP=10.0.103.101
