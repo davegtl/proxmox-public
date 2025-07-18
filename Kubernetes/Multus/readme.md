@@ -10,7 +10,7 @@ sudo apt-get install -y dnsmasq
 kubectl delete pod test-vlan50 -n webservices
 kubectl apply -f test-vlan50.yaml
 
-kubectl exec -n webservices vlan50-test -- ip a
+kubectl exec -n webservices test-vlan50 -- ip a
 
 kubectl describe pod test-vlan50 -n webservices
 
