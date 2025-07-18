@@ -151,21 +151,23 @@ export KUBECONFIG=~/.kube/config
 
 # Step 7: Join other master nodes
 for newnode in "${masters[@]}"; do
-  ssh -i ~/.ssh/$certName $user@$newnode <<EOF
+ssh -t -i ~/.ssh/$certName $user@$newnode "bash -s" <<EOF
+set -eux
 sudo mkdir -p /etc/rancher/rke2
-cat <<EOL | sudo tee /etc/rancher/rke2/config.yaml
-token: $token
-server: https://$master1:9345
-tls-san:
-  - $vip
-  - $master1
-  - $master2
-  - $master3
-EOL
-curl -sfL https://get.rke2.io | sudo sh -
-sudo systemctl enable rke2-server.service
-sudo systemctl start rke2-server.service
+sudo tee /etc/rancher/rke2/config.yaml > /dev/null <<EOT
+token: ${token}
+server: https://${vip}:9345
+node-label:
+  - longhorn=true
+EOT
+curl -sfL https://get.rke2.io -o rke2-install.sh
+chmod +x rke2-install.sh
+sudo INSTALL_RKE2_TYPE="agent" ./rke2-install.sh
+rm -f rke2-install.sh
+sudo systemctl enable rke2-agent.service
+sudo systemctl start rke2-agent.service
 EOF
+
   echo -e " \033[32;5mMaster $newnode joined successfully!\033[0m"
 done
 
