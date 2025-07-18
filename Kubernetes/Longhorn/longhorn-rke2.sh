@@ -1,16 +1,16 @@
 #!/bin/bash
 
 echo -e " \033[33;2m    __  _          _        ___                            \033[0m"
-echo -e " \033[33;2m    \ \(_)_ __ ___( )__    / _ \__ _ _ __ __ _  __ _  ___  \033[0m"
-echo -e " \033[33;2m     \ \ | '_ \` _ \/ __|  / /_\/ _\` | '__/ _\` |/ _\` |/ _ \ \033[0m"
-echo -e " \033[33;2m  /\_/ / | | | | | \__ \ / /_\\  (_| | | | (_| | (_| |  __/ \033[0m"
-echo -e " \033[33;2m  \___/|_|_| |_| |_|___/ \____/\__,_|_|  \__,_|\__, |\___| \033[0m"
+echo -e " \033[33;2m    \\ \\(_)_ __ ___( )__    / _ \\__ _ _ __ __ _  __ _  ___  \033[0m"
+echo -e " \033[33;2m     \\ \\ | '_ \` _ \\/ __|  / /_\\/ _\` | '__/ _\` |/ _\` |/ _ \\ \033[0m"
+echo -e " \033[33;2m  /\\_/ / | | | | | \\__ \\ / /_\\\\ (_| | | | (_| | (_| |  __/ \033[0m"
+echo -e " \033[33;2m  \\___/|_|_| |_| |_|___/ \\____/\\__,_|_|  \\__,_|\\__, |\\___| \033[0m"
 echo -e " \033[33;2m                                               |___/       \033[0m"
 echo -e " \033[35;2m          __                   _                          \033[0m"
 echo -e " \033[35;2m         / /  ___  _ __   __ _| |__   ___  _ __ _ __      \033[0m"
-echo -e " \033[35;2m        / /  / _ \| '_ \ / _\` | '_ \ / _ \| '__| '_ \     \033[0m"
+echo -e " \033[35;2m        / /  / _ \\| '_ \\ / _\` | '_ \\ / _ \\| '__| '_ \\     \033[0m"
 echo -e " \033[35;2m       / /__| (_) | | | | (_| | | | | (_) | |  | | | |    \033[0m"
-echo -e " \033[35;2m       \____/\___/|_| |_|\__, |_| |_|\___/|_|  |_| |_|    \033[0m"
+echo -e " \033[35;2m       \\____/\\___/|_| |_|\\__, |_| |_|\\___/|_|  |_| |_|    \033[0m"
 echo -e " \033[35;2m                         |___/                            \033[0m"
 echo -e " \033[36;2m                                                          \033[0m"
 echo -e " \033[32;2m             https://youtube.com/@jims-garage              \033[0m"
@@ -19,12 +19,6 @@ echo -e " \033[32;2m                                                           \
 #############################################
 # YOU SHOULD ONLY NEED TO EDIT THIS SECTION #
 #############################################
-
-# THIS SCRIPT IS FOR RKE2, NOT K3S!
-# THIS SCRIPT IS FOR RKE2, NOT K3S!
-# THIS SCRIPT IS FOR RKE2, NOT K3S!
-
-
 
 # Set the IP addresses of your Longhorn nodes
 longhorn1=10.0.103.51
@@ -43,58 +37,73 @@ vip=10.0.103.10
 # Array of longhorn nodes
 storage=($longhorn1 $longhorn2 $longhorn3)
 
-#ssh certificate name variable
+# SSH private key name
 certName=id_rsa
 
 #############################################
 #            DO NOT EDIT BELOW              #
 #############################################
-# For testing purposes - in case time is wrong due to VM snapshots
+
+# Sync time (useful after snapshot restores)
 sudo timedatectl set-ntp off
 sudo timedatectl set-ntp on
 
-# add ssh keys for all nodes
+# Add SSH key to all nodes
 for node in "${storage[@]}"; do
-  ssh-copy-id $user@$node
+  ssh-copy-id -i ~/.ssh/$certName $user@$node
 done
 
-# add open-iscsi - needed for Debian and non-cloud Ubuntu
-if ! command -v sudo service open-iscsi status &> /dev/null
-then
-    echo -e " \033[31;5mOpen-ISCSI not found, installing\033[0m"
-    sudo apt install open-iscsi
+# Ensure open-iscsi is installed locally (for mounting Longhorn volumes)
+if ! systemctl is-active --quiet open-iscsi; then
+  echo -e " \033[31;5mOpen-ISCSI not found or not running, installing...\033[0m"
+  sudo apt update && sudo apt install -y open-iscsi
 else
-    echo -e " \033[32;5mOpen-ISCSI already installed\033[0m"
+  echo -e " \033[32;5mOpen-ISCSI already installed and running\033[0m"
 fi
 
-# Step 1: Add new longhorn nodes to cluster (note: label added)
-# Set token variable needed for RKE2 (not required for K3S)
-token=`cat token`
+# Read RKE2 token (must be in same dir as script)
+if [[ ! -f token ]]; then
+  echo -e " \033[31;1mERROR: token file not found in current directory\033[0m"
+  exit 1
+fi
+token=$(cat token)
+
+# Deploy RKE2 agents on each Longhorn node
 for newnode in "${storage[@]}"; do
-  ssh -tt $user@$newnode -i ~/.ssh/$certName sudo su <<EOF
-  mkdir -p /etc/rancher/rke2
-  touch /etc/rancher/rke2/config.yaml
-  echo "token: $token" >> /etc/rancher/rke2/config.yaml
-  echo "server: https://$vip:9345" >> /etc/rancher/rke2/config.yaml
-  echo "node-label:" >> /etc/rancher/rke2/config.yaml
-  echo "  - longhorn=true" >> /etc/rancher/rke2/config.yaml
-  curl -sfL https://get.rke2.io | INSTALL_RKE2_TYPE="agent" sh -
-  systemctl enable rke2-agent.service
-  systemctl start rke2-agent.service
-  exit
+  echo -e " \033[34;1m>> Setting up RKE2 agent on $newnode...\033[0m"
+
+  ssh -i ~/.ssh/$certName $user@$newnode <<EOF
+    set -e
+    sudo mkdir -p /etc/rancher/rke2
+    sudo tee /etc/rancher/rke2/config.yaml > /dev/null <<EOC
+token: ${token}
+server: https://${vip}:9345
+node-label:
+  - longhorn=true
+EOC
+    curl -sfL https://get.rke2.io | sudo INSTALL_RKE2_TYPE="agent" sh -
+    sudo systemctl enable rke2-agent
+    sudo systemctl start rke2-agent
 EOF
-  echo -e " \033[32;5mLonghorn node joined successfully!\033[0m"
+
+  echo -e " \033[32;5m>> $newnode joined the cluster as a Longhorn node\033[0m"
 done
 
-# Step 2: Install Longhorn (using modified Official to pin to Longhorn Nodes)
+# Step 2: Deploy Longhorn using a pinned manifest
+echo -e " \033[34;1m>> Installing Longhorn...\033[0m"
 kubectl apply -f https://raw.githubusercontent.com/JamesTurland/JimsGarage/main/Kubernetes/Longhorn/longhorn.yaml
-kubectl get pods \
---namespace longhorn-system \
---watch
 
-# Step 3: Print out confirmation
+# Wait for Longhorn pods to come up
+echo -e " \033[34;1m>> Watching Longhorn pods...\033[0m"
+kubectl get pods -n longhorn-system --watch &
+WATCH_PID=$!
 
-kubectl get nodes
+# Wait 20 seconds or until all pods are ready
+sleep 20
+kill $WATCH_PID &>/dev/null
+
+# Confirm Longhorn setup
+kubectl get nodes -o wide
 kubectl get svc -n longhorn-system
 
-echo -e " \033[32;5mHappy Kubing! Access Longhorn through Rancher UI\033[0m"
+echo -e " \033[32;1m>> Happy Kubing! Access Longhorn through Rancher UI or port-forward.\033[0m"
